@@ -1,0 +1,334 @@
+---
+title: "Regresion Lineal Múltiple"
+author: "Ramírez Montes Jonathan Natael (50) & Sánchez Romero Paulina Michelle (51)"
+date: "31/1/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#librerrias a utilizar
+setwd("C:/Users/jonat/Downloads/BAYE/proyecto final RLM")
+library(dplyr)
+library(psych)
+library(GGally)
+library(ggplot2)
+library(lmtest)
+library(corrplot)
+library(car)
+library(gridExtra)
+library(grid)
+library(lattice)
+library(sqldf)
+library(rjags)
+library(nortest)
+library(lmtest)
+library(fpp)
+library(MASS)
+library(rriskDistributions)
+```
+
+```{r carga, echo=FALSE}
+#carga del data set y manipulacion de los datos
+db <- read.csv('DRAGONBALL-LEGENDS.csv', header = T)
+options(scipen=999) # quita formato de notacion cientifica
+db$X <- NULL
+db$X.1 <- NULL
+
+#se agregan tres ceros como cadena para que en el siguiente bloque de codigo
+#cuando se sustituya la K por 3 ceros no se afecten aquellos regustron que no
+#tienen k
+db$POWER <- paste(db$POWER, '000', sep = '')
+db$HEALTH <- paste(db$HEALTH, '000', sep = '')
+db$STRIKE.ATTACK <- paste(db$STRIKE.ATTACK, '000', sep = '')
+db$STRIKE.DEFENCE <- paste(db$STRIKE.DEFENCE, '000', sep = '')
+db$BLAST.ATTACK <- paste(db$BLAST.ATTACK, '000', sep = '')
+db$BLAST.DEFENCE <- paste(db$BLAST.DEFENCE, '000', sep = '')
+
+
+#cambiamos las k por 3 ceros, convertimos a numericos los string,
+#y dividimos enytre 1000 para quitar los tres ceros del principio
+db$POWER <- as.numeric(gsub('K', '000', db$POWER)) * 1000
+db$HEALTH <- as.numeric(gsub('K', '000', db$HEALTH)) * 1000
+db$STRIKE.ATTACK <- as.numeric(gsub('K', '000', db$STRIKE.ATTACK)) * 1000
+db$STRIKE.DEFENCE <- as.numeric(gsub('K', '000', db$STRIKE.DEFENCE)) * 1000
+db$BLAST.ATTACK <- as.numeric(gsub('K', '000', db$BLAST.ATTACK)) * 1000
+db$BLAST.DEFENCE <- as.numeric(gsub('K', '000', db$BLAST.DEFENCE)) * 1000
+
+
+#tipos de datos a manejar
+#str(db)
+
+##### dado que el nombre del personaje se repite muchas veces, a pesar de 
+#tener id_Card distinto para trabajar con personajes unicos, lo haremos
+#tomando el promedio de los registros por personaje
+
+#cambio de nombres en los encabezados porque en sentencias sql no se 
+#aceptan nombres con puntos
+names(db) <- c("CHARACTER", "CARD_NUMBER", "POWER", "HEALTH",        
+               "STRIKE_ATTACK", "STRIKE_DEFENCE", "BLAST_ATTACK",
+               "BLAST_DEFENCE" )
+
+db <- sqldf('select 
+            CHARACTER,
+            CARD_NUMBER,
+            median(POWER) as POWER,
+            median(HEALTH) as HEALTH,
+            median(STRIKE_ATTACK) as STRIKE_ATTACK,
+            median(STRIKE_DEFENCE) as STRIKE_DEFENCE,
+            median(BLAST_ATTACK) as BLAST_ATTACK,
+            median(BLAST_DEFENCE) as BLAST_DEFENCE
+            FROM db group by CHARACTER')
+```
+## Introducción.
+Dragon Ball es uno de los animes  más populares de la historia. Creado por Akira Toriyama en 1984 como manga , y llevado a la televisión en 1986. Este fenómeno ha traspasado fronteras y plataformas (papel, televisión, merchandising, videojuegos y cine).
+El impacto de Dragon Ball y parte de su éxito en Japón se origina con la influencia que tomó de la novela clásica de la literatura china '"Viaje al Oeste", de gran popularidad en Asia. Este anime trata sobre una raza denominada “Saiayjin” con aspecto humano que cuentan con gran cantidad de energía denominada “ki”. A través de las Artes Marciales los personajes logran desarrollar técnicas que les permiten emitir energía a través de su cuerpo y lanzar esta misma a sus rivales. A lo largo de varias series de Dragon Ball los personajes evolucionan, mejorando sus habilidades mientras pelean con villanos extraterrestres que quieren destruir la tierra y apoderarse del universo.
+Dragon Ball es un símbolo importante en la cultura pop pues ha marcado tendencia y moda desde los años 90. En la actualidad lo sigue siendo con la última creación de Akira Toriyama, Dragon Ball Super. 
+En esta ocasión abordaremos un data set sobre uno de los videojuegos de Dragon Ball producido por la empresa BAN DAI, este videojuego se encuentra disponible en la play store del sistema operativo Android con el nombre de “Dragon Ball Legends”.
+
+## Propósito.
+Trataremos de predecir el nivel de poder en los personajes dadas las cualidades de defensa y ataque proporcionadas por el data set. Procederemos a través de una regresión lineal múltiple. Una vez conseguido el modelo clásico procederemos a utilizar la herramienta “rjags” proporcionada por el software de R para aplicar metodologías bayesianas para la estimación de los parámetros de nuestra regresión.
+
+## Objetivo del documento.
+Mostrar la diferencia entre un análisis estadístico clásico y uno bayesiano utilizando una regresión lineal múltiple.
+
+## Entendimiento de los datos.
+En este módulo se describirá mediante una tabla la información que fue obtenida vía la página web kaggle, el conjunto de datos estaba conformado por:
+Una tabla con la siguiente taxonomía: 290 observaciones con 8 columnas, cada registro contaba con un identificador CARD.NUMBER. los 290 registros inicialmente estaban representados por un tipo de dato carácter, no obstante esto no era correcto pues el data set presenta las siguientes variables: "CHARACTER", "CARD.NUMBER", "POWER", "HEALTH", "STRIKE.ATTACK", "STRIKE.DEFENCE", "BLAST.ATTACK", "BLAST.DEFENCE", de las cuales las únicas que eran tipo carácter son "CHARACTER" y "CARD.NUMBER", las demás son de tipo numérico pero estaban representadas de una manera incorrecta. A continuación, se muestra una tabla con la descripción de las variables.
+
+## Análisis descriptivo
+```{r ad_1}
+dball <- db[c(3:8)]
+
+multi.hist(x = dball, dcol = c("blue", "red"), dlty = c("dotted", "solid"),
+           main = names(dball) , mar = c(2.5, 2.5, 1, 2))
+```
+
+Con estas gráficas se puede observar el comportamiento de las diferentes variables. Se puede notar que la variable HEALTH es una de las que pareciera que no le podríamos ajustar algún tipo de distribución, pues al menos gráficamente, se puede destacar que hay valores atípicos. En relación con las otras variables podemos ver que muestran colas pesadas.
+Nota: la línea roja es una distribución normal ajustada a los datos.
+Pero, por otra parte, podemos observar en las variables STRIKE se acumula más información en los valores más grandes, resaltando STRIKE_ATTACK, en cuanto a las variables BLAST, podemos ver que tienen un comportamiento similar a pesar de que, al menos intuitivamente, las variables parecieran no tener relación pues una es de ataque y la otra es de defensa.
+
+```{r ad_2}
+boxplot(dball, col = c(1:5))
+
+```
+Con esta gráfica podemos notar en mayor proporción los datos atípicos de nuestras variables, vemos que en todas las variables tenemos datos atípicos, pero que en donde se concentran los de mayor “lejanía” o mayor diferencia es en la variable HEALTH, pues como lo habíamos mencionado anteriormente, es la que tiene un intervalo de mayor magnitud, en comparación de BLAST_DEFENCE y STRIKE_DEFENCE.
+También podemos ver que POWER es la segunda variable que tiene más valores atípicos, y también un intervalo más grande que en las demás variables a excepción de HEALTH. Lo que nos indica que en POWER, además de tener personajes con menor poder que otros se ve una mayor diferencia, con los valores atípicos, entonces observamos que hay personajes que tienen mucho menos poder que otros debido a que todos los valores atípicos que tenemos en todas las variables son en la parte inferior (o en el lado menor del intervalo de valores), y lo mismo sucede con HEALTH.
+
+
+```{r ad_3}
+ggpairs(dball, lower = list(continuous = "smooth"),
+        diag = list(continuous = "barDiag"), axisLabels = "none")
+
+```
+Estos valores nos indican la correlación que existe entre variables, por ejemplo, vemos que las correlaciones de mayor valor las tienen las demás variables con POWER (aunque no tienen la máxima), y que la menor correlación se puede observar en BLAST_ATTACK con STRIKE_ATTACK de 0.686, lo cual es un poco lógico tomando en cuenta que son diferentes tipos de ataques, uno directo y el otro a larga distancia.
+La correlación de mayor valor la tiene BLAST_DEFENCE con STRIKE_DEFENCE, con 0.948, que realmente tomaríamos la misma lógica que en las variables comentadas anteriormente, pero tal vez tengan mayor correlación por ser defensa en lugar de ataque.
+
+## Resúmenes estadisticos
+```{r ad_4}
+summary(dball)
+```
+En cuanto a estos diferentes resúmenes, vemos que la variable que tiene valores más grandes es HEALTH, y que también es la que tiene un intervalo mucho más grande, pues varían en aproximadamente 13,000 unidades/puntos, lo que no pasa con STRIKE_DEFENCE, por ejemplo, que sólo va de 874 a 1660, o BLAST_DEFENCE de 926 a 1630.
+Por otra parte, analizando las medias y las medianas, nos interesa que sean el mismo valor, o que al menos se le acerque mucho una a otra, esto para poder inferir algún tipo de distribución que sea simétrica, como lo es en el caso de casi todas nuestras variables, exceptuando POWER, ya que es la de mayor diferencia entre la mediana y la media.
+También vemos que otra variable que se dispersa más con los valores, es nuestra variable dependiente POWER, y la que tiene el intervalo más pequeño de valores es la BLAST_DEFENCE, lo que nos puede decir que los diferentes personajes pueden tener una defensa de ataque directo más parecida entre ellos, y lo contrario sucede con la mencionada antes POWER, por lo que entre un personaje y otro puede haber una mayor diferencia de poder, lo cual puede poner en ventaja o desventaja en algún enfrentamiento.
+
+## Regresión Lineal Múltiple (análisis clásico)
+```{r modelos, echo=FALSE}
+###### generacion del modelo
+attach(dball)
+db_model <- lm(POWER ~ HEALTH+STRIKE_ATTACK+STRIKE_DEFENCE+BLAST_ATTACK+
+                 BLAST_DEFENCE)
+vif(db_model)
+summary(db_model)
+confint(db_model)
+
+#se puede mejorar con una apriori lasso en la parte bayesiana
+
+# apesar de que el intercepto no atraviesa el cero,
+#presentamos variables colineales 
+
+# podemos observar un R^2 de .9957 para el primer modelo 'db_model'
+#lo cual no indica que el power está explicado 
+# por el 99.58% del modelo y dado el p-value obtenido, 
+#podemos decir que que el modelo está bien explicado sin embargo hay
+#multicolinealidad en dos variables
+
+##################### modelos con 3 variables ########################
+
+###
+#mod1 STRIKE, R = 0.9553
+m1 <- lm(POWER ~ HEALTH + STRIKE_ATTACK + STRIKE_DEFENCE)
+vif(m1)
+summary(m1)
+confint(m1)
+#el intercepto atraviesa el cero lo que nos podria causar 
+#problemas en el modelo por esta razón este modelo no será
+#considerado para aplicarle las pruebas (distribucional,
+#var cte y no correlacion)
+
+#mod2 BLAST, R = 0.953
+m2 <- lm(POWER ~ HEALTH + BLAST_ATTACK + BLAST_DEFENCE)
+vif(m2)
+summary(m2)
+confint(m2)
+#ninguna variable atraviesa el cero 
+
+#mod3 ATTACK sugerido por el VIF R = 0.9692
+m3 <- lm(POWER ~ HEALTH + STRIKE_ATTACK + BLAST_ATTACK)
+vif(m3)
+summary(m3)
+confint(m3)
+#ninguna de las variables atraviesa el cero
+
+#mod4 DEFENCE R = 0.9052
+m4 <- lm(POWER ~ HEALTH + STRIKE_DEFENCE + BLAST_DEFENCE)
+vif(m4)
+#este modelo se deshecha pues el VIF es en las variables defensivas
+#pasan el 10 
+summary(m4)
+confint(m4)
+#aunque en este modelo ninguna variable contiene al cero, el modelo es
+#multicolineal
+
+#modelo blast + strike attack
+m5 <- lm(formula = POWER ~ HEALTH + BLAST_ATTACK 
+          + BLAST_DEFENCE+ STRIKE_ATTACK)
+vif(m5)
+summary(m5)
+confint(m5)
+plot(m5)
+```
+
+Para nuestro Data Set y nuestro modelo, recordemos que la variable dependiente es POWER. Después de probar con varias combinaciones de variables y aplicar las pruebas sugeridas para el modelo de regresion lineal múltiple, el modelo elegido fue el siguiente; A pesar de que sus residuales no distribuyan de forma normal, se intentó ajustar otra distribución a los residuales, no obstante, al realizar pruebas estadísticas para corroborar que los residuales seguían la distribución que se propuso, la estadística rechazaba que lso residuales siguieran alguna distribución, por lo que podemos decir que los residuales no siguen una distribución.
+
+```{r m5}
+m5 <- lm(formula = POWER ~ HEALTH + BLAST_ATTACK 
+          + BLAST_DEFENCE+ STRIKE_ATTACK)
+vif(m5)
+summary(m5)
+confint(m5)
+plot(m5)
+```
+Este modelo pasó las pruebas de varianza constante y no autocorrelación arrojando los siguientes resultados:
+
+```{r pubas_m5}
+#varianza constante
+bptest(m5)
+
+#no autocorrelacion
+dwtest(m5)
+```
+
+## Modelo Bayesiano
+```{r baye_m5, echo=FALSE}
+
+n = nrow(dball)
+
+#lista de datos a atribuir
+
+data <- list(
+  Y = POWER,#variable a predeciIR
+  X_1 = HEALTH,
+  X_2 = BLAST_ATTACK,
+  X_3 = BLAST_DEFENCE,
+  X_4 = STRIKE_ATTACK,
+  n = n,
+  #vector de medias
+  # agregar tantos ceros como betas(PARAMETROS A ESTIMAR)
+  zeros = c(0, 0, 0, 0, 0),
+  diagonal = diag(1/1000, 5) 
+)                       
+
+param <- c('Beta', 'Sigma_2') #no es necesario declarar todas las betas porque
+#se está declarando como vector
+
+#funcion de valores iniciales
+inits <- function(){
+  list(
+    'Beta' = rnorm(5, 0, 1), #distribucion poco infirmativa de las betas
+    'Tau' = rgamma(1, 1, 1)
+  )
+}
+
+modelo_bayes <- 'model{
+  #prior
+  Beta ~ dmnorm(zeros, diagonal) #cambiar por normales univariadas
+  Tau ~ dgamma(0.001, 0.001)      #
+  Sigma_2 <- (1/Tau)
+  
+  #modelo
+  for(i in 1:n){
+    RLM[i] <- Beta[1] + (Beta[2]*X_1[i]) + 
+              (Beta[3]*X_2[i]) +
+               (Beta[4]*X_3[i]) + 
+              (Beta[5]*X_4[i] )
+          
+    Y[i] ~ dnorm(RLM[i], Tau)
+  }
+
+}'
+
+#fit
+
+fit <- jags.model(textConnection(modelo_bayes),
+                  data,
+                  inits,
+                  n.chains = 3
+                  )
+
+update(fit, 1000)
+
+sample <- coda.samples(fit, param, n.iter = 4000, 
+                       thin = 1)
+
+#inspeccionar la parte posterior
+plot(sample)
+##################### la varianza tan grande se debe a la escala de los datos
+########e.g dividir todo el data set entre 100
+##### no hay problema porque en la traza converge en la sigma_2
+####
+
+#residuales bayesiano
+#histograma
+#matriz diseño
+aux = cbind(rep(2, n), HEALTH, BLAST_ATTACK, BLAST_DEFENCE,
+            STRIKE_ATTACK)
+
+aux_cade = do.call(rbind, sample)
+
+aux_params = colMeans(aux_cade)
+
+
+#claculo de los residuales
+ajustado = drop(aux %*% aux_params[1:5])
+residuales = POWER - ajustado 
+hist(residuales, col = 124, breaks = 30, freq = TRUE,
+     main = 'Residuales Bayesianos')
+
+jarque.bera.test(residuales)
+lillie.test(residuales)
+```
+
+Para las trazas se puede ver que todas convergen, a pesar de que nuestra varianza tiene valores muy grandes, podemos ver que también converge. Lo que hace que nuestra varianza tome intervalos tan grandes es la dimensión de los datos, pues las variables están representadas en miles y diez miles.
+
+En relación con los residuales del modelo bayesiano se aplicaron 2 pruebas que también se rechaza la hipótesis de que los residuales distribuyan de manera normal.
+
+
+## Comparacion de los estimadores
+
+### Estimadores clásicos
+$$
+\begin{tabular}{| c | c | c | c | c | c |}
+\hline
+Intercepto &	HEALTH &	BLAST ATTACK &	BLAST DEFENCE &	STRIKE ATTACK & VARIANZA \\ \hline -159.87119 &	0.07191 &	1.02116 &	2.01688 &	1.01305 &	6712 \\ \hline 
+\end{tabular}
+$$
+
+### Estimadores bayesianos
+$$
+\begin{tabular}{| c | c | c | c | c | c |}
+\hline
+Intercepto &	HEALTH &	BLAST ATTACK &	BLAST DEFENCE &	STRIKE ATTACK & VARIANZA \\ \hline -29.64673 &	0.06862 &	1.03118 &	1.94535 &	1.02303 & 6930.97264 \\ \hline
+\end{tabular}
+$$
+Se puede observar que los estimadores, a excepción del intercepto, se parecen demasiado, incluso la varianzas también se encuentran relativamente cercanas, esto se debe a que se asignaron distribuciones poco informativas a las variables predictoras del modelo.
